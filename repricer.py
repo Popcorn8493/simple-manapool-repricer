@@ -1,12 +1,4 @@
 #!/usr/bin/env python3
-"""
-Simple ManaPool Pricer - Single File Version
-
-Prices cards using only ManaPool pricing sources (NM and LP+ prices).
-No MTGJSON or other external dependencies.
-
-Configuration is set directly in this file - just edit the CONFIGURATION section below.
-"""
 
 import json
 import logging
