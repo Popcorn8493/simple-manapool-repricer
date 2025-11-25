@@ -39,6 +39,7 @@ PRICING_STRATEGY = "lp_plus"
 LP_FLOOR_PERCENT = 100.0      # LP+ floor percentage (100 = strict floor)
 MIN_PRICE = 0.01              # Minimum price in dollars
 MAX_REDUCTION_PERCENT = 5.0   # Maximum price drop per run (%)
+PRICE_ADJUSTMENT_FACTOR = 1.042  # API prices are multiplied by this factor
 
 # ============================================================================
 # END CONFIGURATION
@@ -92,6 +93,7 @@ class SimpleManaPoolPricer:
         self.lp_floor_percent = LP_FLOOR_PERCENT
         self.min_price = MIN_PRICE
         self.max_reduction_percent = MAX_REDUCTION_PERCENT
+        self.price_adjustment_factor = PRICE_ADJUSTMENT_FACTOR
 
         logger.info("=" * 80)
         logger.info("Simple ManaPool Pricer - Configuration")
@@ -422,7 +424,8 @@ class SimpleManaPoolPricer:
         if price_cents is None:
             return None
 
-        return float(price_cents) / 100.0
+        # Adjust for API markup factor (divide by 1.042 to get true price)
+        return float(price_cents) / 100.0 / self.price_adjustment_factor
 
     def _get_lp_plus_price(self, card_data: dict, finish: str) -> float | None:
         """Extract LP+ price for given finish."""
@@ -439,7 +442,8 @@ class SimpleManaPoolPricer:
         if price_cents is None:
             return None
 
-        return float(price_cents) / 100.0
+        # Adjust for API markup factor (divide by 1.042 to get true price)
+        return float(price_cents) / 100.0 / self.price_adjustment_factor
 
     def _get_general_price(self, card_data: dict, finish: str) -> float | None:
         """Extract general/market price (price_cents) for given finish."""
@@ -457,7 +461,8 @@ class SimpleManaPoolPricer:
         if price_cents is None:
             return None
 
-        return float(price_cents) / 100.0
+        # Adjust for API markup factor (divide by 1.042 to get true price)
+        return float(price_cents) / 100.0 / self.price_adjustment_factor
 
     def apply_updates(self, updates: list[dict[str, Any]]) -> bool:
         """Apply price updates to ManaPool API (with confirmation)."""
