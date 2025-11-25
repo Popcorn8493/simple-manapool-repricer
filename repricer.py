@@ -1,4 +1,12 @@
 #!/usr/bin/env python3
+"""
+Simple ManaPool Pricer - Single File Version
+
+Prices cards using only ManaPool pricing sources (NM and LP+ prices).
+No MTGJSON or other external dependencies.
+
+Configuration is set directly in this file - just edit the CONFIGURATION section below.
+"""
 
 import json
 import logging
@@ -21,34 +29,42 @@ API_TOKEN = ""
 DRY_RUN = True
 
 # Pricing strategy options:
-# "nm_with_floor" - Use NM price, never go below LP+ (safest, recommended)
-# "lp_plus" - Use LP+ price only (conservative pricing)
-# "average" - Average NM and LP+ prices (balanced)
-# "nm_only" - Use only NM price (aggressive)
-# "lp_nm_low" - Use the lower of LP or NM price (most competitive)
+#   "nm_with_floor" - Use NM price, never go below LP+ (safest, recommended)
+#   "lp_plus"       - Use LP+ price only (conservative pricing)
+#   "average"       - Average NM and LP+ prices (balanced)
+#   "nm_only"       - Use only NM price (aggressive)
+#   "general_low"   - Use price_cents (general/market price - most competitive)
 PRICING_STRATEGY = "lp_plus"
 
-LP_FLOOR_PERCENT = 0.0
-MIN_PRICE = 0.01
-MAX_REDUCTION_PERCENT = 100.0
+LP_FLOOR_PERCENT = 100.0      # LP+ floor percentage (100 = strict floor)
+MIN_PRICE = 0.01              # Minimum price in dollars
+MAX_REDUCTION_PERCENT = 5.0   # Maximum price drop per run (%)
 
 # ============================================================================
 # END CONFIGURATION
 # ============================================================================
 
+# Configure logging
 logging.basicConfig(
-    level=logging.INFO, format="%(message)s", handlers=[logging.StreamHandler(sys.stdout)]
+    level=logging.INFO,
+    format='%(message)s',
+    handlers=[logging.StreamHandler(sys.stdout)]
 )
 logger = logging.getLogger(__name__)
 
 
 class SimpleManaPoolPricer:
+    """Simple pricer using only ManaPool API pricing sources."""
+
     def __init__(self):
+        """Initialize the pricer with environment configuration."""
         self._load_config()
         self._setup_session()
 
     def _load_config(self):
-        self.base_url = API_BASE_URL.rstrip("/")
+        """Load configuration from script constants."""
+        # Load settings from constants defined at top of file
+        self.base_url = API_BASE_URL.rstrip('/')
         self.email = API_EMAIL
         self.access_token = API_TOKEN
 
@@ -60,16 +76,17 @@ class SimpleManaPoolPricer:
             logger.error("")
             logger.error("Please edit this script and set your credentials:")
             logger.error("")
-            logger.error(" 1. Open this file in a text editor")
-            logger.error(" 2. Find the CONFIGURATION section at the top (around line 25)")
-            logger.error(" 3. Set your credentials:")
+            logger.error("  1. Open this file in a text editor")
+            logger.error("  2. Find the CONFIGURATION section at the top (around line 25)")
+            logger.error("  3. Set your credentials:")
             logger.error("")
-            logger.error(' API_EMAIL = "your-email@example.com"')
-            logger.error(' API_TOKEN = "your-access-token-here"')
+            logger.error("     API_EMAIL = \"your-email@example.com\"")
+            logger.error("     API_TOKEN = \"your-access-token-here\"")
             logger.error("")
             logger.error("=" * 80)
             sys.exit(1)
 
+        # Load optional settings from constants
         self.dry_run = DRY_RUN
         self.pricing_strategy = PRICING_STRATEGY
         self.lp_floor_percent = LP_FLOOR_PERCENT
@@ -90,15 +107,14 @@ class SimpleManaPoolPricer:
         logger.info("")
 
     def _setup_session(self):
+        """Setup HTTP session with authentication."""
         self.session = requests.Session()
-        self.session.headers.update(
-            {
-                "X-ManaPool-Email": self.email,
-                "X-ManaPool-Access-Token": self.access_token,
-                "Accept-Encoding": "gzip, deflate",
-                "Connection": "keep-alive",
-            }
-        )
+        self.session.headers.update({
+            "X-ManaPool-Email": self.email,
+            "X-ManaPool-Access-Token": self.access_token,
+            "Accept-Encoding": "gzip, deflate",
+            "Connection": "keep-alive",
+        })
         adapter = requests.adapters.HTTPAdapter(
             pool_connections=10,
             pool_maxsize=20,
@@ -108,6 +124,7 @@ class SimpleManaPoolPricer:
         self.session.mount("https://", adapter)
 
     def fetch_inventory(self) -> list[dict[str, Any]]:
+        """Fetch all inventory from ManaPool API."""
         logger.info("[1/4] Fetching inventory from ManaPool...")
 
         all_items = []
@@ -133,18 +150,19 @@ class SimpleManaPoolPricer:
             total = pagination.get("total", 0)
             returned = pagination.get("returned", 0)
 
-            logger.info(f" Fetched {len(all_items):,}/{total:,} items")
+            logger.info(f"  Fetched {len(all_items):,}/{total:,} items")
 
             if len(all_items) >= total or returned < limit:
                 break
 
             offset += limit
 
-        logger.info(f" Total inventory items: {len(all_items):,}")
+        logger.info(f"  Total inventory items: {len(all_items):,}")
         logger.info("")
         return all_items
 
     def fetch_prices(self) -> dict[str, dict[str, Any]]:
+        """Fetch pricing data from ManaPool API."""
         logger.info("[2/4] Fetching price data from ManaPool...")
 
         url = f"{self.base_url}/prices/singles"
@@ -158,7 +176,7 @@ class SimpleManaPoolPricer:
             sys.exit(1)
 
         cards = data.get("data", [])
-        logger.info(f" Received {len(cards):,} price records")
+        logger.info(f"  Received {len(cards):,} price records")
 
         # Index by both scryfall_id AND product_id for flexible lookup
         price_index = {}
@@ -173,7 +191,7 @@ class SimpleManaPoolPricer:
             if product_id:
                 price_index[product_id] = card
 
-        logger.info(f" Indexed {len(price_index):,} unique entries (by scryfall_id and product_id)")
+        logger.info(f"  Indexed {len(price_index):,} unique entries (by scryfall_id and product_id)")
         logger.info("")
         return price_index
 
@@ -182,13 +200,13 @@ class SimpleManaPoolPricer:
         current_price: float,
         nm_price: float | None,
         lp_plus_price: float | None,
-        lp_price: float | None = None,
+        general_price: float | None = None,
     ) -> tuple[float | None, str]:
         """
         Calculate new price based on strategy.
 
         Returns:
-        (new_price, reason) tuple
+            (new_price, reason) tuple
         """
         if self.pricing_strategy == "nm_only":
             if nm_price is None:
@@ -209,21 +227,12 @@ class SimpleManaPoolPricer:
             new_price = sum(prices) / len(prices)
             reason = f"Average of {len(prices)} sources: ${new_price:.2f}"
 
-        elif self.pricing_strategy == "lp_nm_low":
-            # Use the lower of LP or NM price
-            prices = [p for p in [nm_price, lp_price] if p is not None]
-            if not prices:
-                return None, "No LP or NM price available"
-            new_price = min(prices)
-            if nm_price is not None and lp_price is not None:
-                if new_price == nm_price:
-                    reason = f"NM: ${nm_price:.2f} (lower than LP: ${lp_price:.2f})"
-                else:
-                    reason = f"LP: ${lp_price:.2f} (lower than NM: ${nm_price:.2f})"
-            elif nm_price is not None:
-                reason = f"NM: ${nm_price:.2f} (LP not available)"
-            else:
-                reason = f"LP: ${lp_price:.2f} (NM not available)"
+        elif self.pricing_strategy == "general_low":
+            # Use general/market price (price_cents)
+            if general_price is None:
+                return None, "No general price available"
+            new_price = general_price
+            reason = f"General/market price: ${general_price:.2f}"
 
         else:  # nm_with_floor (default)
             if nm_price is None:
@@ -255,8 +264,11 @@ class SimpleManaPoolPricer:
         return new_price, reason
 
     def process_inventory(
-        self, inventory: list[dict[str, Any]], price_data: dict[str, dict[str, Any]]
+        self,
+        inventory: list[dict[str, Any]],
+        price_data: dict[str, dict[str, Any]]
     ) -> list[dict[str, Any]]:
+        """Process inventory and calculate new prices."""
         logger.info("[3/4] Processing inventory and calculating new prices...")
 
         # Debug: Show sample inventory item structure
@@ -264,16 +276,16 @@ class SimpleManaPoolPricer:
             logger.info("")
             logger.info("Debug - Sample inventory item fields:")
             sample = inventory[0]
-            logger.info(f" Keys: {list(sample.keys())}")
-            logger.info(f" Sample: {dict(list(sample.items())[:5])}")
+            logger.info(f"  Keys: {list(sample.keys())}")
+            logger.info(f"  Sample: {dict(list(sample.items())[:5])}")
             logger.info("")
 
         # Debug: Show sample price data structure
         if price_data:
             logger.info("Debug - Sample price data:")
             sample_key = list(price_data.keys())[0]
-            logger.info(f" Sample key: {sample_key}")
-            logger.info(f" Sample value keys: {list(price_data[sample_key].keys())[:10]}")
+            logger.info(f"  Sample key: {sample_key}")
+            logger.info(f"  Sample value keys: {list(price_data[sample_key].keys())[:10]}")
             logger.info("")
 
         updates = []
@@ -329,14 +341,17 @@ class SimpleManaPoolPricer:
                     stats["no_data"] += 1
                     continue
 
-                # Extract NM, LP+, and LP prices based on finish
+                # Extract NM, LP+, and general prices based on finish
                 nm_price = self._get_nm_price(card_data, finish)
                 lp_plus_price = self._get_lp_plus_price(card_data, finish)
-                lp_price = self._get_lp_price(card_data, finish)
+                general_price = self._get_general_price(card_data, finish)
 
                 # Calculate new price
                 new_price, reason = self.calculate_new_price(
-                    current_price, nm_price, lp_plus_price, lp_price
+                    current_price,
+                    nm_price,
+                    lp_plus_price,
+                    general_price
                 )
 
                 if new_price is None:
@@ -359,46 +374,41 @@ class SimpleManaPoolPricer:
 
                 # Create update record
                 # Note: API requires scryfall_id for updates
-                updates.append(
-                    {
-                        "scryfall_id": lookup_id,  # Use whatever ID we found
-                        "finish_id": finish,
-                        "condition_id": condition,
-                        "language_id": language,
-                        "price_cents": int(new_price * 100),
-                        "quantity": item.get("quantity", 0),
-                        # Metadata for reporting
-                        "_name": name,
-                        "_set": set_code,
-                        "_current_price": current_price,
-                        "_new_price": new_price,
-                        "_reason": reason,
-                        "_matched_by": (
-                            "scryfall_id"
-                            if scryfall_id and price_data.get(scryfall_id)
-                            else "product_id"
-                        ),
-                    }
-                )
+                updates.append({
+                    "scryfall_id": lookup_id,  # Use whatever ID we found
+                    "finish_id": finish,
+                    "condition_id": condition,
+                    "language_id": language,
+                    "price_cents": int(new_price * 100),
+                    "quantity": item.get("quantity", 0),
+                    # Metadata for reporting
+                    "_name": name,
+                    "_set": set_code,
+                    "_current_price": current_price,
+                    "_new_price": new_price,
+                    "_reason": reason,
+                    "_matched_by": "scryfall_id" if scryfall_id and price_data.get(scryfall_id) else "product_id",
+                })
 
             except Exception as e:
                 stats["errors"] += 1
                 logger.debug(f"Error processing {item.get('name', 'unknown')}: {e}")
 
         logger.info("")
-        logger.info(" Processing Summary:")
-        logger.info(f" Total cards: {stats['total']:,}")
-        logger.info(f" No price data: {stats['no_data']:,}")
-        logger.info(f" No change: {stats['no_change']:,}")
-        logger.info(f" Increases: {stats['increased']:,}")
-        logger.info(f" Decreases: {stats['decreased']:,}")
-        logger.info(f" Errors: {stats['errors']:,}")
-        logger.info(f" Total updates: {len(updates):,}")
+        logger.info("  Processing Summary:")
+        logger.info(f"    Total cards: {stats['total']:,}")
+        logger.info(f"    No price data: {stats['no_data']:,}")
+        logger.info(f"    No change: {stats['no_change']:,}")
+        logger.info(f"    Increases: {stats['increased']:,}")
+        logger.info(f"    Decreases: {stats['decreased']:,}")
+        logger.info(f"    Errors: {stats['errors']:,}")
+        logger.info(f"    Total updates: {len(updates):,}")
         logger.info("")
 
         return updates
 
     def _get_nm_price(self, card_data: dict, finish: str) -> float | None:
+        """Extract NM price for given finish."""
         field_map = {
             "NF": "price_cents_nm",
             "FO": "price_cents_nm_foil",
@@ -415,6 +425,7 @@ class SimpleManaPoolPricer:
         return float(price_cents) / 100.0
 
     def _get_lp_plus_price(self, card_data: dict, finish: str) -> float | None:
+        """Extract LP+ price for given finish."""
         field_map = {
             "NF": "price_cents_lp_plus",
             "FO": "price_cents_lp_plus_foil",
@@ -430,14 +441,16 @@ class SimpleManaPoolPricer:
 
         return float(price_cents) / 100.0
 
-    def _get_lp_price(self, card_data: dict, finish: str) -> float | None:
-        field_map = {
-            "NF": "price_cents_lp",
-            "FO": "price_cents_lp_foil",
-            "EF": "price_cents_lp_etched",
-        }
-        field = field_map.get(finish)
-        if not field:
+    def _get_general_price(self, card_data: dict, finish: str) -> float | None:
+        """Extract general/market price (price_cents) for given finish."""
+        # price_cents is only available for nonfoil, not for foil or etched variants
+        if finish == "NF":
+            field = "price_cents"
+        elif finish == "FO":
+            field = "price_cents_foil"
+        elif finish == "EF":
+            field = "price_cents_etched"
+        else:
             return None
 
         price_cents = card_data.get(field)
@@ -447,6 +460,7 @@ class SimpleManaPoolPricer:
         return float(price_cents) / 100.0
 
     def apply_updates(self, updates: list[dict[str, Any]]) -> bool:
+        """Apply price updates to ManaPool API (with confirmation)."""
         if not updates:
             logger.info("[4/4] No updates to apply")
             return True
@@ -476,10 +490,10 @@ class SimpleManaPoolPricer:
         total_change = total_new - total_current
 
         logger.info("Summary:")
-        logger.info(f" Total updates: {len(updates):,}")
-        logger.info(f" Price increases: {increases:,}")
-        logger.info(f" Price decreases: {decreases:,}")
-        logger.info(f" Total value change: ${total_change:+,.2f}")
+        logger.info(f"  Total updates: {len(updates):,}")
+        logger.info(f"  Price increases: {increases:,}")
+        logger.info(f"  Price decreases: {decreases:,}")
+        logger.info(f"  Total value change: ${total_change:+,.2f}")
         logger.info("")
 
         # Check if this is dry run mode
@@ -516,16 +530,14 @@ class SimpleManaPoolPricer:
         # Remove metadata fields before sending to API
         clean_updates = []
         for update in updates:
-            clean_updates.append(
-                {
-                    "scryfall_id": update["scryfall_id"],
-                    "finish_id": update["finish_id"],
-                    "condition_id": update["condition_id"],
-                    "language_id": update["language_id"],
-                    "price_cents": update["price_cents"],
-                    "quantity": update["quantity"],
-                }
-            )
+            clean_updates.append({
+                "scryfall_id": update["scryfall_id"],
+                "finish_id": update["finish_id"],
+                "condition_id": update["condition_id"],
+                "language_id": update["language_id"],
+                "price_cents": update["price_cents"],
+                "quantity": update["quantity"],
+            })
 
         # Apply updates in batches
         batch_size = 1500
@@ -536,16 +548,16 @@ class SimpleManaPoolPricer:
 
         for i in range(0, total, batch_size):
             batch_num = i // batch_size + 1
-            batch = clean_updates[i : i + batch_size]
+            batch = clean_updates[i:i + batch_size]
 
-            logger.info(f" Batch {batch_num}/{num_batches}: {len(batch):,} updates...")
+            logger.info(f"  Batch {batch_num}/{num_batches}: {len(batch):,} updates...")
 
             try:
                 response = self.session.post(url, json=batch, timeout=120)
                 response.raise_for_status()
-                logger.info(f" Batch {batch_num}/{num_batches}: Success!")
+                logger.info(f"  Batch {batch_num}/{num_batches}: Success!")
             except requests.exceptions.RequestException as e:
-                logger.error(f" Batch {batch_num}/{num_batches}: Failed - {e}")
+                logger.error(f"  Batch {batch_num}/{num_batches}: Failed - {e}")
                 return False
 
         logger.info("")
@@ -553,11 +565,17 @@ class SimpleManaPoolPricer:
         return True
 
     def _print_extremes(self, updates: list[dict[str, Any]], limit: int = 10):
+        """Print biggest increases and decreases."""
         # Sort by absolute change
         sorted_by_increase = sorted(
-            updates, key=lambda u: u["_new_price"] - u["_current_price"], reverse=True
+            updates,
+            key=lambda u: u["_new_price"] - u["_current_price"],
+            reverse=True
         )
-        sorted_by_decrease = sorted(updates, key=lambda u: u["_new_price"] - u["_current_price"])
+        sorted_by_decrease = sorted(
+            updates,
+            key=lambda u: u["_new_price"] - u["_current_price"]
+        )
 
         logger.info(f"Top {limit} INCREASES:")
         logger.info(f"{'Card':<40} {'Set':<6} {'Current':>10} {'New':>10} {'Change':>12}")
@@ -593,6 +611,7 @@ class SimpleManaPoolPricer:
             )
 
     def _print_sample_updates(self, updates: list[dict[str, Any]], limit: int = 20):
+        """Print sample of updates for dry-run mode."""
         logger.info("Sample price changes (first %d):", min(limit, len(updates)))
         logger.info("")
         logger.info(f"{'Card':<40} {'Set':<6} {'Current':>10} {'New':>10} {'Change':>10}")
@@ -617,6 +636,7 @@ class SimpleManaPoolPricer:
         logger.info("")
 
     def save_report(self, updates: list[dict[str, Any]]):
+        """Save detailed report to JSON file."""
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         filename = f"price_updates_{timestamp}.json"
 
@@ -634,6 +654,7 @@ class SimpleManaPoolPricer:
         logger.info(f"Detailed report saved to: {filename}")
 
     def run(self):
+        """Run the pricing workflow."""
         try:
             # Fetch data
             inventory = self.fetch_inventory()
@@ -665,15 +686,15 @@ class SimpleManaPoolPricer:
         except Exception as e:
             logger.error(f"\nUnexpected error: {e}")
             import traceback
-
             traceback.print_exc()
             return 1
         finally:
-            if hasattr(self, "session"):
+            if hasattr(self, 'session'):
                 self.session.close()
 
 
 def main():
+    """Main entry point."""
     pricer = SimpleManaPoolPricer()
     sys.exit(pricer.run())
 
