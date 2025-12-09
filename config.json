@@ -1,0 +1,27 @@
+{
+  "_help": {
+    "api": {
+      "base_url": "ManaPool API base URL. Usually doesn't need to be changed."
+    },
+    "pricing": {
+      "dry_run": "When true, shows what changes would be made without actually updating prices. Keep as true for testing",
+      "strategy": "Pricing strategy: 'lp_plus' (conservative, recommended), 'nm_with_floor' (safest - uses NM but won't go below LP+), 'average' (balanced - average of NM and LP+), 'nm_only' (aggressive - uses only NM price), 'general_low' (most competitive - uses general market price)",
+      "lp_floor_percent": "LP+ floor percentage. 100.0 = strict floor (never go below LP+ price). Lower values allow prices below LP+.",
+      "min_price": "Minimum price in dollars. Prices will never be set below this value.",
+      "max_reduction_percent": "Maximum price drop per run (%). Prevents large price drops in a single update. Example: 5.0 means prices can drop at most 5% per run.",
+      "price_adjustment_factor": "API prices are divided by this factor to get the true price. Default 1.042 accounts for API markup applied by ManaPool for singles fees."
+    }
+  },
+  "api": {
+    "base_url": "https://manapool.com/api/v1"
+  },
+  "pricing": {
+    "dry_run": true,
+    "strategy": "lp_plus",
+    "lp_floor_percent": 100.0,
+    "min_price": 0.01,
+    "max_reduction_percent": 5.0,
+    "price_adjustment_factor": 1.042
+  }
+}
+
